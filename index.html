@@ -62,7 +62,7 @@ button.on{background:var(--pri);color:var(--prik);border-color:var(--pri)}
 /* scanner */
 .card{background:var(--card);border-radius:var(--r);padding:14px;margin-bottom:14px;box-shadow:0 1px 0 var(--line)}
 #reader{width:100%;margin-top:12px;border-radius:14px;overflow:hidden;background:#000}
-#reader:empty{margin:0;display:none}
+#reader:empty{margin:0;height:0;border-radius:0}
 #torch{margin-top:10px}
 .isbnrow{display:flex;gap:8px;margin-top:12px}
 .isbnrow input{flex:1;min-width:0;font-size:1.1rem;font-variant-numeric:tabular-nums;letter-spacing:.02em}
@@ -100,7 +100,8 @@ button.on{background:var(--pri);color:var(--prik);border-color:var(--pri)}
   padding:10px 14px calc(10px + env(safe-area-inset-bottom));background:var(--card);border-top:1px solid var(--line);box-shadow:0 -8px 24px #0001}
 #tot{flex:1;line-height:1.15;color:var(--mute);font-size:.85rem}
 #tot b{display:block;color:var(--ink);font-size:1.35rem;font-weight:900;font-variant-numeric:tabular-nums}
-.bar button{min-width:84px}
+.bar button{min-width:0;padding:10px 14px}
+#smsg{font-weight:600;color:var(--mute)}#smsg.ok{color:var(--ok)}#smsg.bad{color:var(--bad)}#smsg.wait{color:var(--warn)}
 
 /* merge */
 input[type=file]{padding:8px;min-height:0;font-size:.95rem}
@@ -134,7 +135,7 @@ dialog input{margin-bottom:10px}
   </div>
   <div id="list"></div>
   <button id="clr" class="link">Finish this box and start the next</button>
-  <div class="bar"><span id="tot"></span><button id="exp">Excel</button><button id="expw" class="p">Word list</button></div>
+  <div class="bar"><span id="tot"></span><button id="exp">Excel</button><button id="expw">Word</button><button id="shr" class="p">Share</button></div>
 </section>
 
 <section id="merge" class="hide">
@@ -145,6 +146,16 @@ dialog input{margin-bottom:10px}
     <p id="mmsg" role="status"></p>
   </div>
 </section>
+
+<dialog id="sdlg">
+  <h3>Share this box</h3>
+  <p id="sttl" style="color:var(--mute)"></p>
+  <button id="sword" class="big p">Share Word list</button>
+  <button id="swa" class="big" style="margin-top:8px">Send list as WhatsApp message</button>
+  <button id="sxl" class="big" style="margin-top:8px">Share Excel file</button>
+  <p id="smsg" role="status" style="margin-top:12px"></p>
+  <button id="sclose" class="link">Close</button>
+</dialog>
 
 <dialog id="dlg">
   <form method="dialog" id="mf">
@@ -378,15 +389,19 @@ $('dlg').addEventListener('close',()=>{
 
 /* Export */
 const clean=s=>(s||'').trim().replace(/[^\w\-]+/g,'_')||'Unnamed';
-$('exp').onclick=()=>{
-  if(!S.items.length){say('Nothing to export yet.');return}
+function boxWorkbook(){
   const rows=S.items.slice().reverse().map(i=>({ISBN:i.isbn,Title:i.title,Author:i.author,Copies:i.copies}));
   const ws=XLSX.utils.json_to_sheet(rows,{header:['ISBN','Title','Author','Copies']});
   ws['!cols']=[{wch:16},{wch:48},{wch:30},{wch:8}];
   // keep ISBN as text so Excel does not mangle it
   rows.forEach((r,i)=>{const c=ws['A'+(i+2)];if(c&&r.ISBN){c.t='s';c.v=r.ISBN}});
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Box');
-  XLSX.writeFile(wb,`${clean(S.station)}_Box${clean(S.box)}.xlsx`);
+  return wb;
+}
+const boxName=()=>`${clean(S.station)}_Box${clean(S.box)}`;
+$('exp').onclick=()=>{
+  if(!S.items.length){say('Nothing to export yet.');return}
+  XLSX.writeFile(boxWorkbook(),boxName()+'.xlsx');
   say('Exported. Start a new box when you are done.');
 };
 $('clr').onclick=()=>{
@@ -401,7 +416,7 @@ $('clr').onclick=()=>{
 const LOGO="iVBORw0KGgoAAAANSUhEUgAAAFUAAABOCAMAAABmOqowAAADAFBMVEVvKi19Rki1hIzY1tfOxs7t6u3n5efPzc/Ny827ubu3tbfZ2Nu9vcatxsbP2dm+x8ettbWlra20vLze5+fM09Pg4uLGyMjb3NzZ2to5nCEhjAAxlBCUxoQplABPmixymVoYGBB1dWNSUkp/f3uJiYW3t7Lm5uK8vLnq6ufc3NnLy8jGxb1pXCc0LhXOzMRUSiemopN7ZzDt6uLNzMn/tQC9jBaEYxDqryPOnCHTqkichEqfloDf1sDrqRjGlCHirTWlhDlkVTW/q39vZU66rpP/rQD3pQD3rRDWlBCseRHenBh7WhiccyHJlzGMaymUczHPrWewmWrWwZjJwK2/vLbo5+XnnBDOjBC1hCmwjEzmvXXjypzPuZGTi3328ejGjCm9jDmNcEKbhmS+t6y0rqRoRA2veSeWayjVxa2vqJ7Lx8Hh3NV7Xz6GcFbe187Ev7nZ1dC2sq739fPj4d+cm5rc29pCMSFCOTHq5N+cUhjiyriEe3XVzsnr1sr06uS3tbT59/b39fT08vHf3dxSMSHNUh5lTkTo3tq/uri7trRza2j7+Pfy7+7OdV3gp5itJgnRmY3vuK2GGAOtRzaMPi/Ph3vvIQC3GADSJgr3GADpOyWyNieEKR7vWEXrZFPTFATojoeydXBSDQjsKRycIRjMWlLea2Pnc2v3CADnCAAxAAB7CwtSISEQCAieXl4YEBAhGBgpISEyKSk5MTFKQkJaUlJ7c3OblJTv5+erpqaVk5Pb2dnLycm5t7f6+fnx8PDs6+vm5eXh4ODW1dXHxsbEw8PBwMCzsrKysbHAwMD9/f37+/v5+fn39/f19fXz8/Pv7+/s7Ozr6+vo6Ojn5+fl5eXj4+Pf39/c3Nzb29vZ2dnW1tbV1dXT09PS0tLQ0NDPz8/Ozs7Nzc3MzMzLy8vIyMjFxcXCwsK/v7+8vLy7u7u5ubm4uLi3t7e1tbWxsbGvr6+srKyqqqqkpKSMjIyEhIRra2tnZ2djY2NaWlpKSkpERERCQkI5OTkpKSkAAACalz9AAAAAynRSTlP///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////8Az9wt2QAAAAFiS0dE/6UH8sUAAAAMY21QUEpDbXAwNzEyAAAAA0gAc7wAABHySURBVFhHtZl7XFN3lsDtQHcXVndlOzvr1h3FtNvtTKERm0hSeQXMTYhGEOwlqViM2qAWtLaUWCPtri0yYituqRilyija4nbSPEiimyosTIAhEEiAJEgiIoISxYQAySbZJHdOwluZT/vPHkmI8Lvfe+4553ceP5a0/n/IksWgapCfeTO1um2Rtc9S21rVbe3tdT8P+0Fdu6a97Zm1z1LXnVS3d3R2tLf9DG2L/qOjE5b+DOrJM2pNvVbbqflpbd85o9HqdJ0/h9rKPqWp7+ruWmTx09qXr9N2Nyy2cBFvtZV9Ut9t0P809stibUOjoauz7hlbLRYDZ85+0dVobOz+CW2LzhY1GHsNuo5nPbAY9eTZSl3jij7jYlrMqfWJoLi7t++2XvusWVsXjdcvz17U95lNxq5F1JjBqovPHuk1m3u7FzHA4tR3zp491ds/YG7U/eVAuCgQNJoHzMbgkqd3zdO6qtvqYANcLBMcuTM0aDLMezzYRfO20SnB2VPm+4MmfX27Wl3X3r5wKyykqus0wbD+pLis4sCQarCvp3PGFep2zbyAL6ooE3x0f/jebTCSur1Tq6tfsBcWUNuOrdP16CGmNBfKBOfvqFT9xhlljz3f2dXQ0FU/ZZIPzgsEv+9XDfc3ajX7NtR3ByKmXjMXC/Opde9z2HHmfnNvT31RxVcVp26q7vd1TznsGE72G/ANeDyI/c+KsnMH7g0HnuUVStS+EPO9/r75ITaPultWGBWpVDU3DfbpdecFZ4/0z1r2VZkQ86lUTUNg6QD2nTLBxb6BeyaDrjOusLBQsra5efhO41zkzlF3U2K2UHKTkpufjNwMMRz+sizOGNQb9sKrMkwkxmQjjy3DpoC26qLKI5+Z+0Madeti0YToQgprY3hYU/9cyMxSd+dx2LzP4wlEZuYjy7DZoP3iQvJ7pn4z7IW3ZJhYHAnYMOuj4RB9/Sfsyrfgjibjq9lMBkLYUpuXQFTaRpvMBgiIYDzPUlNY+OPR+fEol0liWi03V3R3sr/mfDQwaG58KwU0FYnEkZg7rMVys68n7auPP7wzdK+vITmBwd5JYNVG5eZu2mYLGwYvLKSexLEpvEJOPJdNI6Q+Hn1gaviC8XXu3vuqmz8qhUGoSCQSKketI4Nxqd9vfn+4aTikJxlBEki0VOnn0TzGDnvLyECjtn2BrkeleWl4CieWQECZu8eePAjp6WR+XZ481Kz610ggigNvkUKRrSW8aeM33+QMNFsemHvqj7K5pNhN0fhcXsyWbWOjqhVdU5E3YwG+WI5fz+ZxCQjbOj72eLivq4OcWrZXZWniYQAFRUHEmC/c9uT0V1za3tHR5n59Z/u+WMYWX1pUDOt42j679aG5Z8oE09QPeLLjx32UGD+XUHzqls0y1Nt1gIGyLww3vxyEzoAxRcmNq5eYaLatxTJkLPl9NZoqwrEKSWgUaYO9BW60gLpbzOMwczmETSmJxQL26MigUZeBoCVHLliDJg1CA29C8dIvT2m2IgwrWKmPXczeJfck0gt3EnNZO2wtzeaGBdRWAyeFzMiPZURoT2w8aG0eMHaREFKP5rRcKJ7RFZhCIeY8faM1G0GyA8758L0bmgMbyHhKLD2N8qnd2hQyHQQzdj2cz8nHS/ITcRmfjtvB0bf3UtF0TeuUqtN2BahIKFquaT2CIOgtcE6IPmMXJ2e9OJ9D3lRrHxsdvj2dOqep6trcJJlfKs7NjUlLHrWFPTDFA7W1xAlWnfEVMEEwV2hrCTKlbH8mEV8oEcre5CRsXmO3WQYh2dQF0uUUVa3mJ6WxktgSMf5zSu6WQ9ZHGVSEntH6Wi3oN6Vi4C34SWpt1ZARKtc2doIN0V8o5aUxCETeiaCzdJ0dHZq6KSq0FUfZ5Fg6R+aPQembuOv3PElEEOIRTWjExEQEyPLl1uVLlwZeS62hphLNVjqy+cQhIj0tlrYzj5OwnrtFcsgOQf5Gt65LV68JUIfq2jt1b1HYHBmOnUOgUmkJm/N2MElUJK5Es2j/EqpJpKK0TTxuTiyC0NC84+JaSn6LzTKwL7/BAKW8I0DdmP++zmD0cd7Ny9tJiKUiVGr8Jj83HmX1xH138duLAbl69cLFCzPy7V7N21RqKiZKY1DBwARWTJSUcgsiIJu50xhigiwXpLJZcb3mgRQOCUFpjBwaQkWjpLzc1H2te6qu1dRcu3atfPL619dqrlUJ4P8V12pOaUpy35XgKdx4iAWETqMS1ks/tVkyGOhG08BdyOQBagaTkfPewNDaPBqBlkWi58DSLBK3UF7SeqbmnEBwvqZSufy1Zd8I9piW/XDtXEVFzXc9Wn4UiYaCkZB4LoeOZkXb7dbXGbSs/Xfv3+2dssA7nERqhnlowL0ToTHTiCQGjQpCSyRnX60RnDKdrnpOE1pZXHX6hVDT8sqKcxU1xWvTg0sASk3l0lhJMf8LYaVk0Zkf3R0IgbocjIGJmM0pvf1371N2MmNpUbn0LC4peBE1S1BzJu7SlWVLrYKa6mWmpaYXHFXnzlV9jAaACPJxUtIWFo2KEKPC7dZfxeCVn/WZ+oJ1JhhZjdfz9Ma+2/s4DISObMqjb97EZaBwKUoUVFVfLTc5XT9cqwb28lBQVsBFgYjmkFms+DRvIo1BQHfZ7U8ykv/R0Gg06nUd0E9M74JX0rv0hvdYaA5K4FJyNued+F1mBhMuzkot/vaSyT25vLLqOaXVai2oLE6gUxHG7oPNKiU+F89JQkgMZOP4mCXxx0a9Qd+thf5gNhOqs7/Qdb/FINEQErr+eHSB3fZouI+NElNzi78rc74gc09eipgsiLD+ICjOoaMMeOLme7dreWmELCZg0+32ZnJfo17fA9D5WXv74U5dESmempBAImzyh9ufQG1r2lJcXFZ9pqZqj0OxVNm6dDJ0orxKUEwibgjm9Z7ruTQIBMhtJJt9hGwygqrT5XAmZ+093KHLQAkkLoOGMtfYWkbuGXWvlF+rOFd9qaKmfFlEhGOp6bmCH8BZgirB2LgtUKOej4E9g7KIVHSbfZRs7g1QF1aY5GOdOjIVJcXTkNiY0UCW6+k4dqGm4pzAeenC6V9cei3CVFBWBlCI1+pDkEnuNHS0vZ4Q2LFcBpI9bss+uqIxaNZ5Fmhja+oPk6g5YFiUWzBdLuuuBqill749X3XtFw5HeU2ACdTzJ4IJGtTauBO2FymHmm4f2x8w7MyQMG2BoowO3XYUQSFMcnbYoHqYAy3ktwHq1eqqczXVl6rOVkxBgdpiD1f1BcqpeiuTRkPg8f5kt5COgrumlZ2OrJ319V1x8QQEoFvt42OjD6B50ahP11TAXgJa1UVlGXyelostkPZ7ddCn1N1IzwrsBwaUl9ezDHrABv01RT3C7tA1vBEPd6VvfeFE5t7R5sEV0Lq+f66moga+BPxQxdnAh4oaSDI1Z+xjj2/26jTr3n57+wEySgBtt9lbHsZmNAA22MIFqW3Mddoew3b4NYEc9zZCRQ6OPrwHWeITaFOrBSBXrwqqq6vPB14gJ6YahmNM2LgZJTkoDerNuM1ylN6gNxiCygap28kanf7DWCSewN2RTAgUJejF+g3aX4YWHSg5UFJScqCo5MaNEm1QNJqJE/bwh/2GLmYgGyTzkxBQ909jT4YS42DPBjvcALWNeaCzuzEOvBmb52OAGaixt1pgb8V9btUEBEhTwBuBfz0luKhAq2b6DeiIEIg+FspAkEyIm/SM3l6Yv2aoiYeBmkhD0piUlPgAlnDQFt58501K6epVz4p1Qy7n0xbL8F4EhRREK0zLYRDoObfGwhKzTX1zVDVze0dXBotJoG8SywKpGM3KDHtt/1p2rmzVi1Py6+nv8O1fWuPiiem/a96/gYgiXDRLTMmhIlnrEzMz0Df6Q3obZu16kEQmpyYxGVR0vYSycSMJIebExsczGMS1BSt//ZS8+FqrNhFFkfj4LBY1vSmTEgPVi4ZseJNO3zZk7p0XA6272W8q0xNIKI3ACrfbdgcMBY+HbL3hWPXiQuqLq9Y4tOlIVhadnsBAVY8s+yEN01Bkm+3fmlX9AA0Ov9N7C4apbIQBtFib3ZoZT4uPTc8o2n4gAit9WtnVUgy3a9u2zHTIs+j9JtURKIjwtQ1qzBBMKVNj10zOatMcZiQiDBoJ+qffsuip+Vr4ZU8kVrtqoa6rSjFM5BsbHwu7mc3a+ce7d0KClYFoHYPWc0WDdmromqGq615JCuxo2kFIgmtr3T7XjdbWfZjosnsBduXqJZe9StfE+NiTh/dDfuy7bTwMaQtBUg9aRx+pYPBdmLX//fmNDEIgrT+2qMzNjojlYlzouBj7wxXx6nk2eHG1DPvKoVBcf+lxWFPTUH8IBP12FkpAaAwyc38zzE1TaXta141ZkAMJyNa9lubhkD0FE64CHibEaiVXLmO+1XMOW8WvFV4uV04qMEwofTjyYDAEJsLOTBJCT6XTDz1qHoTsMEdVv0lCiSRm5oilaci8B1OEWhVCTOSdXHIZjIibtcE/r5HLve5vfpj0CUUY5rOONgccVN/ZZd6KT0jNfDQC2WEetTWZScovUYWFNd/svz3hVij3Tfp8TkdpZaTYLfeXTmNX8uU+h9uxodLp87mccuwlq3Vk2GzUd3frG3cRc1+3WKay7qwFitg5mbebLE037/7xkNytkCtSSicnFd/ke9wOudu1JohduVqeoph0Kfnl5Skur5fvw3j/PdKkumva8WmfKZlBfhBmeUrXd9jMUKPq/6LFMo8cl6+QetyeSQXvSmmB0uFyT7pcgF2Z75dy8lx8Pn9XWdSk2+OSe3xgXQouEhMWKrci5JEnj4anB66ZDp6MHugtxURCl1PmypcrHWv5bu+VP7jz+XKnQuGQulatxItF3nwO3sXfkP9xpcup8HhwTgkWECG8NlPJt1oeq1YEKsRcl0EmsL1Cocft4uNwbmfoOF8uX/K9T1HA98mdboVCyZPJ/XJ5flLUmpQU7payJXKcQlHLd3pr5X4veE7IosXeGnsC1Pl2VZNj38WEoloX7rjb44lImSh18a5E+13jkzy83+ectCocpW6cv5ATlVLK4UpTKnGg7QaZV+51uktdUhGeRMrZNlMjZ3U9zCYRC6MjXS5filziV/KVcsXXl2v9/A04oFI8CleBS+pQyn15eVGULXg35+oSv8yNk/twXi/OJ8/bws3J2mG3hz9YGAMv5ZOISVyeG9zklvlkUomfV+mjUK7zeVIvBe91ykW1jusFE55CSkwU3rkrBn9FIqn1yD3yWgnO61TE5BLZTuvTVIPvOJsbQyl1ul1SiViIwQz4/RJ3SkyKAo9PofDEvkmP01UoVbjd0VFRKZfS3MLLX4ExReJar8cjlfBk7hScZ+JpC5z0yJ2loKVMAjzwqch3vNLro0StWSMVSSKFQi/MWl4JVuuBDyL+cxyX111+OTh/CUVSGajsBa3DZ7qEWbvuifRLJSKhBwdXwQjscldeFuLw0TLwhytS6HuBjwkLrG6rXFjg9IhxfJfIX1jp8gMUbokJxXAxppwaDoPHDtPx+mog7IRYgQneRJFuz39dFvkhPjEsQjkRiSmcVpdI4XRFSP2hEZPYpFsilPgKoyEUhZGSaAlsA7jMboPuVD91qjZNPQnjqhBydKnYY//7+38N86rEg/mtfGySz5eJ3EKvy+8Vi+SRvkmHQrRcLsKUCj/m+4eW615JpChSJIqMFNoeBTqThZ2mwS3zyJwFlrsDd819Ro9P6Q4Vy10Ol0zhsD76m35TSN8/9X72ywfhBS/7ax0yTGh1+rExSFr3Q3415sD5ZJ6Jgfv9t3umDzjnzrPqOnUNMC40Gnq6tCmiZXKl1+t1jDy4NwjluFHf092lA+nq6m7425EJj5cvi8YePnwAB2pdWu3/dOsNRqMRuqHpM9A5Kpw8dsIpeX0nDM0vi8AUo7+9N3jXdBt6XUihHdDDwMmlRtPRAat03X+ncjpXmE29em0H/DTwMzhgnz2BnKPC6N0GR57B+b7Nbv2rHuOKFXB7IGqCP5wVWBXE6Lp7euA4EmYWOEQNXFk3+/eI+dT5Azac7sPjwu2njhGekiAG1O7QLHL8PK/GPjOyw3krPPPc7Z+d6aeUX3TW/0u6Bk+Vf/rvEIsyW1v/DAdxd4yul1mNAAAAAElFTkSuQmCC";
 const up=t=>String(t||'').toUpperCase();
 function saveBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
-async function downloadWord(rows,station,fname){
+async function downloadWord(rows,station,fname,asBlob){
   const D=docx,F='Tahoma',C=D.AlignmentType.CENTER;
   const run=(t,b)=>new D.TextRun({text:t,bold:!!b,font:F,size:24});
   const P=(t,b,al)=>new D.Paragraph({alignment:al,children:[run(t,b)]});
@@ -427,7 +442,9 @@ async function downloadWord(rows,station,fname){
       new D.Paragraph({keepNext:true,children:[run('RECEIVED BY ',true),run(dots(50))]}),
       sign('NAME:',60),sign('SIGNATURE:',55),sign('DATE:',60)
     ]}]});
-  saveBlob(await D.Packer.toBlob(doc),fname+'.docx');
+  const blob=await D.Packer.toBlob(doc);
+  if(asBlob)return blob;
+  saveBlob(blob,fname+'.docx');
 }
 $('expw').onclick=async()=>{
   if(!S.items.length){say('Nothing to export yet.','bad');return}
@@ -437,6 +454,47 @@ $('expw').onclick=async()=>{
   try{await downloadWord(rows,S.station,clean(S.station)+'_Box'+clean(S.box));say('Word list downloaded.','ok')}
   catch(e){say('Word export failed: '+e.message+'. Is the docx library loaded?','bad')}
 };
+
+/* Share: opens the phone's share sheet (WhatsApp, email, Drive...) with the file attached */
+const MIME_DOCX='application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const MIME_XLSX='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const wordRows=()=>S.items.slice().reverse().map(i=>({Title:i.title||(i.isbn?'ISBN '+i.isbn:''),Author:i.author,Copies:i.copies}));
+const shareNote=()=>`List of books to ${S.station.trim()||'(destination)'}${S.box?', box '+S.box:''}: ${S.items.length} titles, ${S.items.reduce((a,i)=>a+i.copies,0)} books.`;
+function shareText(){
+  const lines=wordRows().map((r,n)=>`${n+1}. ${up(r.Title)}${r.Author?' - '+up(r.Author):''} (${r.Copies})`);
+  return shareNote()+'\n\n'+lines.join('\n');
+}
+function shareMsg(t,k){const m=$('smsg');m.textContent=t;m.className=k||''}
+async function shareFile(blob,name,mime){
+  const f=new File([blob],name,{type:mime});
+  if(navigator.canShare&&navigator.canShare({files:[f]})){
+    try{await navigator.share({files:[f],title:name,text:shareNote()});return 'shared'}
+    catch(e){if(e.name==='AbortError')return 'cancelled'}
+  }
+  saveBlob(blob,name);return 'downloaded';
+}
+const sharedMsg=(r,what)=>r==='shared'?['Shared '+what+'.','ok']:r==='cancelled'?['Share cancelled.','']:['This browser cannot share files, so the '+what+' was downloaded. Attach it in WhatsApp.','wait'];
+$('shr').onclick=()=>{
+  if(!S.items.length){say('Nothing to share yet. Scan a book first.','bad');return}
+  const miss=S.items.filter(i=>i.state!=='ok').length;
+  $('sttl').textContent=shareNote();
+  shareMsg(miss?miss+' book(s) still have no title.':'','wait');
+  $('sdlg').showModal();
+};
+$('sword').onclick=async()=>{
+  shareMsg('Preparing Word list…','wait');
+  try{const b=await downloadWord(wordRows(),S.station,boxName(),true);const r=await shareFile(b,boxName()+'.docx',MIME_DOCX);shareMsg(...sharedMsg(r,'Word list'))}
+  catch(e){shareMsg('Could not make the Word list: '+e.message,'bad')}
+};
+$('sxl').onclick=async()=>{
+  shareMsg('Preparing Excel…','wait');
+  try{const o=XLSX.write(boxWorkbook(),{bookType:'xlsx',type:'array'});const r=await shareFile(new Blob([o],{type:MIME_XLSX}),boxName()+'.xlsx',MIME_XLSX);shareMsg(...sharedMsg(r,'Excel file'))}
+  catch(e){shareMsg('Could not make the Excel file: '+e.message,'bad')}
+};
+$('swa').onclick=()=>{ // plain text list straight into WhatsApp (no file needed)
+  window.open('https://wa.me/?text='+encodeURIComponent(shareText()),'_blank','noopener');
+};
+$('sclose').onclick=()=>$('sdlg').close();
 
 /* Merge */
 async function doMerge(kind){
