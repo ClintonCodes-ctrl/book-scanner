@@ -2,90 +2,87 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Book box scanner</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@7.8.2/build/index.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <style>
-:root{--bg:#f6f7f4;--card:#fff;--ink:#1d2a24;--mute:#68766f;--line:#d9dfd9;--acc:#1f6f54;--accink:#fff;--warn:#b4560b;--bad:#b3261e}
-@media (prefers-color-scheme:dark){:root{--bg:#121816;--card:#1b2420;--ink:#e8efe9;--mute:#93a39a;--line:#2d3a34;--acc:#4fb98f;--accink:#08130e;--warn:#e8a15c;--bad:#f2837c}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,sans-serif;padding:12px;max-width:760px;margin:auto}
-h1{font-size:1.25rem;margin:4px 0 10px}
-.tabs{display:flex;gap:6px;margin-bottom:10px}
-.tabs button{flex:1}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
-.row{display:flex;gap:8px;flex-wrap:wrap}
-.row>*{flex:1;min-width:120px}
-input,button{font:inherit;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
-button{cursor:pointer}
-button.p{background:var(--acc);color:var(--accink);border-color:var(--acc);font-weight:600}
-button.on,.tabs button.on{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+:root{--bg:#f3f5f1;--card:#fff;--ink:#17231d;--mute:#5f6d65;--line:#dbe2dc;--acc:#1b6b4f;--accink:#fff;--warn:#b4560b;--bad:#b3261e;--r:14px}
+@media (prefers-color-scheme:dark){:root{--bg:#101614;--card:#1a231f;--ink:#e8efe9;--mute:#9aaaa1;--line:#2c3933;--acc:#4fb98f;--accink:#08130e;--warn:#e8a15c;--bad:#f2837c}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0 auto;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,sans-serif;max-width:560px;padding:calc(12px + env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom))}
+h1{font-size:1.2rem;margin:4px 2px 10px}
+.seg{display:flex;gap:3px;background:var(--line);border-radius:12px;padding:3px;margin-bottom:12px}
+.seg button{flex:1;border:0;background:transparent;color:var(--mute);border-radius:10px}
+.seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px #0003}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:1fr 96px;gap:10px}
+.lab{display:block;font-size:.75rem;font-weight:700;color:var(--mute);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1;min-width:140px}
+input,button{font:inherit;min-height:48px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+input{width:100%}
+button{cursor:pointer;font-weight:600}
+button.p{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+button.on{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+.seg button.on{background:var(--card);color:var(--ink);border:0}
 :focus-visible{outline:3px solid var(--acc);outline-offset:2px}
-#reader{width:100%;margin-top:8px}
-#msg{min-height:1.3em;color:var(--mute);margin:8px 0 0;padding:10px 12px;border-radius:8px;font-weight:600;border:1px solid var(--line)}
-#msg.ok{background:var(--acc);color:var(--accink);border-color:var(--acc)}
-#msg.wait{background:var(--warn);color:#fff;border-color:var(--warn)}
-#msg.bad{background:var(--bad);color:#fff;border-color:var(--bad)}
-.tw{overflow-x:auto}
-table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
-td.n{white-space:nowrap}
-td input{width:56px;padding:6px;text-align:center}
-td button{padding:6px 10px}
-.pend{color:var(--warn);font-style:italic}
-.tot{color:var(--mute);margin:8px 0 0}
+.big{width:100%;font-size:1.05rem}
+#reader{width:100%;margin-top:10px;border-radius:12px;overflow:hidden}
+#reader:empty{display:none}
+.isbnrow{display:flex;gap:8px;margin-top:10px}
+.isbnrow input{flex:1;min-width:0}.isbnrow button{min-width:84px}
+#msg{margin:10px 0 0;padding:12px;border-radius:12px;font-weight:600;background:var(--bg);color:var(--mute)}
+#msg.ok{background:var(--acc);color:var(--accink)}
+#msg.wait{background:var(--warn);color:#fff}
+#msg.bad{background:var(--bad);color:#fff}
+.link{width:100%;border:0;background:none;color:var(--acc);text-decoration:underline;min-height:44px;margin-top:4px}
+.item{position:relative;display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px;margin-bottom:8px}
+.item.new{animation:fl 1.4s ease-out}
+@keyframes fl{from{box-shadow:0 0 0 3px var(--acc);background:color-mix(in srgb,var(--acc) 18%,var(--card))}to{box-shadow:0 0 0 0 transparent}}
+.info{padding-right:24px;min-width:0}
+.ti{font-weight:650;overflow-wrap:anywhere}
+.au{color:var(--mute);font-size:.92rem}
+.is{color:var(--mute);font-size:.78rem}
+.pend{color:var(--warn);font-style:italic;font-weight:500}
+.step{display:flex;align-items:center;gap:4px}
+.step button{min-width:44px;padding:0;font-size:1.25rem}
+.step input{width:52px;padding:0;text-align:center}
+.x{position:absolute;top:2px;right:2px;width:36px;min-height:36px;padding:0;border:0;background:none;color:var(--mute)}
+.empty{text-align:center;color:var(--mute);padding:18px}
+.bar{position:fixed;left:0;right:0;bottom:0;max-width:560px;margin:0 auto;display:flex;align-items:center;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--card);border-top:1px solid var(--line)}
+#tot{flex:1;font-size:.85rem;color:var(--mute);line-height:1.25}
 .hide{display:none}
-dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);width:min(92vw,420px)}
-dialog input{width:100%;margin-bottom:8px}
+dialog{border:1px solid var(--line);border-radius:var(--r);background:var(--card);color:var(--ink);width:min(92vw,420px)}
+dialog input{margin-bottom:8px}
 </style>
 </head>
 <body>
 <h1>Book box scanner</h1>
-<div class="tabs">
-  <button id="tScan" class="on">Enter a box</button>
-  <button id="tMerge">Merge boxes</button>
-</div>
+<div class="seg"><button id="tScan" class="on">Enter a box</button><button id="tMerge">Merge boxes</button></div>
 
 <section id="scan">
-  <div class="card">
-    <div class="row">
-      <input id="station" placeholder="Destination, e.g. SIAYA PROBATION" autocomplete="off">
-      <input id="box" placeholder="Box number" autocomplete="off">
-    </div>
+  <div class="card grid">
+    <div><label class="lab" for="station">Destination</label><input id="station" placeholder="e.g. MWINGI (WAITA) PRISON" autocomplete="off" autocapitalize="characters"></div>
+    <div><label class="lab" for="box">Box</label><input id="box" placeholder="14" autocomplete="off"></div>
   </div>
   <div class="card">
-    <div class="row">
-      <input id="isbn" inputmode="numeric" enterkeyhint="go" placeholder="Scan or type ISBN" autocomplete="off">
-      <button id="add" class="p">Add</button>
-      <button id="cam">Start camera</button>
-      <button id="manual">Add without ISBN</button>
-    </div>
+    <button id="cam" class="big p">Start camera</button>
     <div id="reader"></div>
-    <p id="msg" role="status"></p>
+    <div class="isbnrow"><input id="isbn" inputmode="numeric" enterkeyhint="go" placeholder="Type or scan ISBN" autocomplete="off"><button id="add" class="p">Add</button></div>
+    <p id="msg" role="status">Ready. Scan the first book.</p>
+    <button id="manual" class="link">No ISBN? Add a book manually</button>
   </div>
-  <div class="card">
-    <div class="tw">
-      <table>
-        <thead><tr><th>ISBN</th><th>Title</th><th>Author</th><th>Copies</th><th></th></tr></thead>
-        <tbody id="list"></tbody>
-      </table>
-    </div>
-    <p class="tot" id="tot"></p>
-    <div class="row" style="margin-top:10px">
-      <button id="expw" class="p">Download Word list</button>
-      <button id="exp">Excel (for merging)</button>
-      <button id="clr">Start new box</button>
-    </div>
-  </div>
+  <div id="list"></div>
+  <button id="clr" class="link">Start a new box</button>
+  <div class="bar"><span id="tot"></span><button id="exp">Excel</button><button id="expw" class="p">Word list</button></div>
 </section>
 
 <section id="merge" class="hide">
   <div class="card">
     <p>Choose the Excel files (from "Excel (for merging)") for boxes going to the same destination. Copies for the same ISBN are added together and S/NO is renumbered.</p>
     <input type="file" id="files" accept=".xlsx,.xls" multiple>
-    <div class="row" style="margin-top:10px"><input id="mstation" placeholder="Destination, e.g. SIAYA PROBATION"><input id="mname" placeholder="File name (e.g. Mwingi_All)"><button id="mgow" class="p">Merge to Word</button><button id="mgo">Merge to Excel</button></div>
+    <div class="row" style="margin-top:10px"><input id="mstation" placeholder="Destination, e.g. MWINGI (WAITA) PRISON"><input id="mname" placeholder="File name (e.g. Mwingi_All)"><button id="mgow" class="p">Merge to Word</button><button id="mgo">Merge to Excel</button></div>
     <p id="mmsg" role="status"></p>
   </div>
 </section>
@@ -103,7 +100,7 @@ dialog input{width:100%;margin-bottom:8px}
 <script>
 const $=id=>document.getElementById(id);
 const KEY='bookbox.v1';
-let S={station:'',box:'',items:[]};
+let S={station:'',box:'',items:[]},flash=null;
 try{S=Object.assign(S,JSON.parse(localStorage.getItem(KEY)||'{}'))}catch(e){}
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 const say=(t,k)=>{const m=$('msg');m.textContent=t;m.className=k||''};
@@ -140,6 +137,7 @@ async function lookup(isbn){
 async function addIsbn(raw){
   const isbn=toIsbn13(raw);
   if(!isbn){say('Not a valid ISBN: '+raw+'. Check the digits.','bad');return}
+  flash=isbn;setTimeout(()=>{flash=null},1500);
   const ex=S.items.find(i=>i.isbn===isbn);
   if(ex){ex.copies++;save();render();say(`+1 copy: ${ex.title||isbn} (now ${ex.copies})`,'ok');beep();return}
   const it={isbn,title:'',author:'',copies:1,state:'pending'};
@@ -165,16 +163,17 @@ function beep(){
 
 /* Rendering */
 function render(){
-  $('list').innerHTML=S.items.map((it,i)=>{
+  $('list').innerHTML=S.items.length?S.items.map((it,i)=>{
     const t=it.state==='pending'?'<span class="pend">title pending…</span>':
-      it.state==='missing'?`<span class="pend" data-edit="${i}">not found, tap to enter</span>`:esc(it.title);
-    return `<tr><td>${esc(it.isbn||'—')}</td><td data-edit="${i}">${t}</td><td>${esc(it.author)}</td>
-    <td class="n"><button data-d="${i}" aria-label="Fewer">−</button>
+      it.state==='missing'?'<span class="pend">not found, tap to enter</span>':esc(it.title);
+    return `<div class="item${it.isbn&&it.isbn===flash?' new':''}">
+    <div class="info" data-edit="${i}"><div class="ti">${t}</div><div class="au">${esc(it.author)}</div><div class="is">${esc(it.isbn||'No ISBN')}</div></div>
+    <div class="step"><button data-d="${i}" aria-label="Fewer">−</button>
     <input type="number" min="1" value="${it.copies}" data-c="${i}" aria-label="Copies">
-    <button data-u="${i}" aria-label="More">+</button></td>
-    <td><button data-x="${i}" aria-label="Delete row">✕</button></td></tr>`}).join('');
+    <button data-u="${i}" aria-label="More">+</button></div>
+    <button class="x" data-x="${i}" aria-label="Delete book">✕</button></div>`}).join(''):'<p class="empty">No books in this box yet.</p>';
   const n=S.items.reduce((a,i)=>a+i.copies,0);
-  $('tot').textContent=`${S.items.length} titles, ${n} books in this box`;
+  $('tot').textContent=`${S.items.length} titles · ${n} books`;
   $('station').value=S.station;$('box').value=S.box;
 }
 $('list').addEventListener('click',e=>{
@@ -204,7 +203,7 @@ $('add').onclick=submitIsbn;
 /* Camera */
 let cam=null,last='',lastT=0;
 $('cam').onclick=async()=>{
-  if(cam){await cam.stop().catch(()=>{});cam=null;$('cam').textContent='Start camera';$('cam').classList.remove('on');return}
+  if(cam){await cam.stop().catch(()=>{});try{cam.clear()}catch(e){}cam=null;$('cam').textContent='Start camera';$('cam').classList.remove('on');return}
   if(!window.Html5Qrcode){say('Camera library did not load. Check your connection.');return}
   try{
     cam=new Html5Qrcode('reader',{formatsToSupport:[Html5QrcodeSupportedFormats.EAN_13],useBarCodeDetectorIfSupported:true});
