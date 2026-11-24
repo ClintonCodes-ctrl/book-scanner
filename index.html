@@ -473,7 +473,7 @@ async function shareFile(blob,name,mime){
   }
   saveBlob(blob,name);return 'downloaded';
 }
-const sharedMsg=(r,what)=>r==='shared'?['Shared '+what+'.','ok']:r==='cancelled'?['Share cancelled.','']:['This browser cannot share files, so the '+what+' was downloaded. Attach it in WhatsApp.','wait'];
+const sharedMsg=(r,what)=>r==='shared'?['Shared '+what+'.','ok']:r==='cancelled'?['Share cancelled.','']:[what+' saved to Downloads (Chrome will not share this file type directly). In WhatsApp tap the paperclip, choose Document, then pick the file. Or use "Send list as WhatsApp message" above.','wait'];
 $('shr').onclick=()=>{
   if(!S.items.length){say('Nothing to share yet. Scan a book first.','bad');return}
   const miss=S.items.filter(i=>i.state!=='ok').length;
