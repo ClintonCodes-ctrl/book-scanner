@@ -63,12 +63,13 @@ dialog input{margin-bottom:8px}
 
 <section id="scan">
   <div class="card grid">
-    <div><label class="lab" for="station">Destination</label><input id="station" placeholder="e.g. SHANZU PROBATION" autocomplete="off" autocapitalize="characters"></div>
+    <div><label class="lab" for="station">Destination</label><input id="station" list="dests" placeholder="e.g. SHANZU PROBATION" autocomplete="off" autocapitalize="characters"><datalist id="dests"></datalist></div>
     <div><label class="lab" for="box">Box</label><input id="box" placeholder="14" autocomplete="off"></div>
   </div>
   <div class="card">
     <button id="cam" class="big p">Start camera</button>
     <div id="reader"></div>
+    <button id="torch" class="big hide" aria-pressed="false">Flashlight off</button>
     <div class="isbnrow"><input id="isbn" inputmode="numeric" enterkeyhint="go" placeholder="Type or scan ISBN" autocomplete="off"><button id="add" class="p">Add</button></div>
     <p id="msg" role="status">Ready. Scan the first book.</p>
     <button id="manual" class="link">No ISBN? Add a book manually</button>
@@ -118,19 +119,55 @@ function toIsbn13(raw){
   return null;
 }
 
-/* Title lookup: Open Library first, Google Books as fallback */
+/* Title lookup: several sources asked at once, best-ranked hit wins.
+   Local cache (incl. titles typed by hand) is checked first. */
+const CKEY='bookbox.cache.v1';
+let CACHE={};try{CACHE=JSON.parse(localStorage.getItem(CKEY)||'{}')}catch(e){}
+const remember=(isbn,title,author)=>{if(!isbn||!title)return;CACHE[isbn]={title,author:author||''};try{localStorage.setItem(CKEY,JSON.stringify(CACHE))}catch(e){}};
+const toIsbn10=i=>{ // only 978-prefixed ISBN-13s have a 10-digit twin
+  if(!/^978\d{10}$/.test(i))return null;
+  const b=i.slice(3,12);let s=0;for(let k=0;k<9;k++)s+=+b[k]*(10-k);
+  const c=(11-s%11)%11;return b+(c===10?'X':c);
+};
+async function getJson(url){
+  const ac=new AbortController(),t=setTimeout(()=>ac.abort(),9000);
+  try{const r=await fetch(url,{signal:ac.signal});if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}
+  finally{clearTimeout(t)}
+}
+const fmt=(t,sub,au)=>t?{title:t+(sub?': '+sub:''),author:Array.isArray(au)?au.filter(Boolean).join(', '):(au||'')}:null;
+const SOURCES=[
+  async(i,j)=>{ // Open Library, ISBN-13 and ISBN-10 keys
+    const keys=[i,j].filter(Boolean).map(k=>'ISBN:'+k);
+    const d=await getJson(`https://openlibrary.org/api/books?bibkeys=${keys.join(',')}&format=json&jscmd=data`);
+    for(const k of keys){const b=d[k];if(b&&b.title)return fmt(b.title,b.subtitle,(b.authors||[]).map(a=>a.name))}
+    return null;
+  },
+  async(i)=>{ // Open Library search index (finds editions the data API misses)
+    const d=await getJson(`https://openlibrary.org/search.json?q=isbn:${i}&fields=title,subtitle,author_name&limit=1`);
+    const b=(d.docs||[])[0];return b?fmt(b.title,b.subtitle,b.author_name):null;
+  },
+  async(i,j)=>{ // Google Books, both ISBN forms
+    for(const q of [i,j].filter(Boolean)){
+      const d=await getJson(`https://www.googleapis.com/books/v1/volumes?q=isbn:${q}&maxResults=1`);
+      const v=(d.items||[])[0]?.volumeInfo;if(v&&v.title)return fmt(v.title,v.subtitle,v.authors);
+    }
+    return null;
+  },
+  async(i)=>{ // Crossref: academic and publisher books worldwide
+    const d=await getJson(`https://api.crossref.org/works?filter=isbn:${i}&rows=1&select=title,subtitle,author`);
+    const b=(d.message?.items||[])[0];
+    return b&&b.title?.[0]?fmt(b.title[0],b.subtitle?.[0],(b.author||[]).map(a=>[a.given,a.family].filter(Boolean).join(' '))):null;
+  },
+];
 async function lookup(isbn){
-  try{
-    const r=await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
-    const d=(await r.json())['ISBN:'+isbn];
-    if(d&&d.title)return{title:d.title+(d.subtitle?': '+d.subtitle:''),author:(d.authors||[]).map(a=>a.name).join(', ')};
-  }catch(e){if(!navigator.onLine)throw e}
-  try{
-    const r=await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
-    const v=((await r.json()).items||[])[0]?.volumeInfo;
-    if(v&&v.title)return{title:v.title+(v.subtitle?': '+v.subtitle:''),author:(v.authors||[]).join(', ')};
-  }catch(e){throw e}
-  return null; // reached the services, book not found
+  if(CACHE[isbn])return CACHE[isbn];
+  const j=toIsbn10(isbn);
+  const res=await Promise.allSettled(SOURCES.map(s=>s(isbn,j)));
+  const hit=res.find(r=>r.status==='fulfilled'&&r.value);
+  if(hit){remember(isbn,hit.value.title,hit.value.author);return hit.value}
+  // every source failed to answer (offline/blocked): let the caller retry later
+  if(res.every(r=>r.status==='rejected'))throw new Error('no source reachable');
+  return null; // reached at least one service, book not found
 }
 
 /* Adding books */
@@ -139,26 +176,31 @@ async function addIsbn(raw){
   if(!isbn){say('Not a valid ISBN: '+raw+'. Check the digits.','bad');return}
   flash=isbn;setTimeout(()=>{flash=null},1500);
   const ex=S.items.find(i=>i.isbn===isbn);
-  if(ex){ex.copies++;save();render();say(`+1 copy: ${ex.title||isbn} (now ${ex.copies})`,'ok');beep();return}
+  if(ex){ex.copies++;save();render();say(`+1 copy: ${ex.title||isbn} (now ${ex.copies})`,'ok');beep('copy');return}
   const it={isbn,title:'',author:'',copies:1,state:'pending'};
-  S.items.unshift(it);save();render();beep();say('Looking up '+isbn+'…','wait');
+  S.items.unshift(it);save();render();beep('new');say('Looking up '+isbn+'…','wait');
   await resolve(it);
 }
 async function resolve(it){
   try{
     const r=await lookup(it.isbn);
     if(r){it.title=r.title;it.author=r.author;it.state='ok';say('Added: '+r.title,'ok')}
-    else{it.state='missing';say('Not found online: '+it.isbn+'. Tap the row to type the title.','bad')}
+    else{it.state='missing';beep('miss');say('Not found online: '+it.isbn+'. Tap the row to type the title.','bad')}
   }catch(e){it.state='pending';say('Lookup failed (offline or blocked). Book saved, will retry.','wait')}
   save();render();
 }
 function retryPending(){S.items.filter(i=>i.state==='pending'&&i.isbn).forEach(resolve)}
 addEventListener('online',retryPending);
 
-function beep(){
-  try{navigator.vibrate&&navigator.vibrate(60);
-  const c=new (window.AudioContext||window.webkitAudioContext)(),o=c.createOscillator();
-  o.frequency.value=880;o.connect(c.destination);o.start();setTimeout(()=>{o.stop();c.close()},90)}catch(e){}
+/* Distinct feedback so you can tell outcomes apart without looking:
+   new = one high beep, copy = two quick mid beeps, miss = long low buzz */
+const TONES={new:{v:[60],n:[[880,0,.09]]},copy:{v:[40,40,40],n:[[660,0,.06],[660,.1,.06]]},miss:{v:[200],n:[[180,0,.4]]}};
+function beep(kind='new'){
+  const t=TONES[kind]||TONES.new;
+  try{navigator.vibrate&&navigator.vibrate(t.v);
+  const c=new (window.AudioContext||window.webkitAudioContext)(),end=Math.max(...t.n.map(x=>x[1]+x[2]));
+  t.n.forEach(([f,s,d])=>{const o=c.createOscillator();o.type=kind==='miss'?'sawtooth':'sine';o.frequency.value=f;o.connect(c.destination);o.start(c.currentTime+s);o.stop(c.currentTime+s+d)});
+  setTimeout(()=>c.close(),(end+.1)*1000)}catch(e){}
 }
 
 /* Rendering */
@@ -185,12 +227,23 @@ $('list').addEventListener('click',e=>{
     const it=S.items[+t.closest('[data-edit]').dataset.edit];
     const v=prompt('Title',it.title);if(v===null)return;
     it.title=v;it.author=prompt('Author',it.author)??it.author;it.state='ok';
+    remember(it.isbn,it.title,it.author); // same ISBN never needs typing again
   }else return;
   save();render();
 });
 $('list').addEventListener('change',e=>{
   if(e.target.dataset.c!==undefined){S.items[+e.target.dataset.c].copies=Math.max(1,parseInt(e.target.value)||1);save();render()}
 });
+/* Recent destinations (datalist) */
+const DKEY='bookbox.dest.v1';
+let DEST=[];try{DEST=JSON.parse(localStorage.getItem(DKEY)||'[]')}catch(e){}
+function rememberDest(){
+  const d=S.station.trim();if(!d)return;
+  DEST=[d,...DEST.filter(x=>x.toUpperCase()!==d.toUpperCase())].slice(0,15);
+  try{localStorage.setItem(DKEY,JSON.stringify(DEST))}catch(e){}drawDest();
+}
+function drawDest(){$('dests').innerHTML=DEST.map(d=>`<option value="${esc(d)}">`).join('')}
+$('station').onchange=rememberDest;
 $('station').oninput=e=>{S.station=e.target.value;save()};
 $('box').oninput=e=>{S.box=e.target.value;save()};
 
@@ -201,9 +254,15 @@ $('isbn').addEventListener('input',e=>{if(e.target.value.replace(/[^0-9X]/gi,'')
 $('add').onclick=submitIsbn;
 
 /* Camera */
-let cam=null,last='',lastT=0;
+let cam=null,last='',lastT=0,torchOn=false;
+const setTorchLabel=()=>{$('torch').textContent='Flashlight '+(torchOn?'on':'off');$('torch').setAttribute('aria-pressed',torchOn);$('torch').classList.toggle('on',torchOn)};
+$('torch').onclick=async()=>{
+  if(!cam)return;
+  try{await cam.applyVideoConstraints({advanced:[{torch:!torchOn}]});torchOn=!torchOn;setTorchLabel()}
+  catch(e){say('Flashlight not available on this camera.','bad')}
+};
 $('cam').onclick=async()=>{
-  if(cam){await cam.stop().catch(()=>{});try{cam.clear()}catch(e){}cam=null;$('cam').textContent='Start camera';$('cam').classList.remove('on');return}
+  if(cam){await cam.stop().catch(()=>{});try{cam.clear()}catch(e){}cam=null;$('cam').textContent='Start camera';$('cam').classList.remove('on');torchOn=false;$('torch').classList.add('hide');return}
   if(!window.Html5Qrcode){say('Camera library did not load. Check your connection.');return}
   try{
     cam=new Html5Qrcode('reader',{formatsToSupport:[Html5QrcodeSupportedFormats.EAN_13],useBarCodeDetectorIfSupported:true});
@@ -213,6 +272,8 @@ $('cam').onclick=async()=>{
       last=txt;lastT=now;addIsbn(txt);
     });
     $('cam').textContent='Stop camera';$('cam').classList.add('on');
+    // show the flashlight button only if this phone's camera supports a torch
+    try{if(cam.getRunningTrackCapabilities().torch){torchOn=false;setTorchLabel();$('torch').classList.remove('hide')}}catch(e){}
   }catch(e){cam=null;say('Camera unavailable. It needs HTTPS and camera permission.')}
 };
 
@@ -240,7 +301,9 @@ $('exp').onclick=()=>{
 };
 $('clr').onclick=()=>{
   if(S.items.length&&!confirm('Clear this box and start a new one? Export first if you have not.'))return;
-  S={station:S.station,box:'',items:[]};save();render();$('box').focus();
+  rememberDest();
+  const n=/^\d+$/.test(String(S.box).trim())?String(+S.box+1):''; // next box number
+  S={station:S.station,box:n,items:[]};save();render();$('isbn').focus();
 };
 
 
@@ -322,7 +385,7 @@ function tab(m){
 }
 $('tScan').onclick=()=>tab(false);$('tMerge').onclick=()=>tab(true);
 
-render();retryPending();
+drawDest();render();retryPending();
 </script>
 </body>
 </html>
