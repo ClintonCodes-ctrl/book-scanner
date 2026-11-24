@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Book box scanner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@7.8.2/build/index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<style>
+:root{--bg:#f6f7f4;--card:#fff;--ink:#1d2a24;--mute:#68766f;--line:#d9dfd9;--acc:#1f6f54;--accink:#fff;--warn:#b4560b;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#121816;--card:#1b2420;--ink:#e8efe9;--mute:#93a39a;--line:#2d3a34;--acc:#4fb98f;--accink:#08130e;--warn:#e8a15c;--bad:#f2837c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,sans-serif;padding:12px;max-width:760px;margin:auto}
+h1{font-size:1.25rem;margin:4px 0 10px}
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tabs button{flex:1}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>*{flex:1;min-width:120px}
+input,button{font:inherit;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+button{cursor:pointer}
+button.p{background:var(--acc);color:var(--accink);border-color:var(--acc);font-weight:600}
+button.on,.tabs button.on{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+#reader{width:100%;margin-top:8px}
+#msg{min-height:1.3em;color:var(--mute);margin:8px 0 0;padding:10px 12px;border-radius:8px;font-weight:600;border:1px solid var(--line)}
+#msg.ok{background:var(--acc);color:var(--accink);border-color:var(--acc)}
+#msg.wait{background:var(--warn);color:#fff;border-color:var(--warn)}
+#msg.bad{background:var(--bad);color:#fff;border-color:var(--bad)}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+td.n{white-space:nowrap}
+td input{width:56px;padding:6px;text-align:center}
+td button{padding:6px 10px}
+.pend{color:var(--warn);font-style:italic}
+.tot{color:var(--mute);margin:8px 0 0}
+.hide{display:none}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);width:min(92vw,420px)}
+dialog input{width:100%;margin-bottom:8px}
+</style>
+</head>
+<body>
+<h1>Book box scanner</h1>
+<div class="tabs">
+  <button id="tScan" class="on">Enter a box</button>
+  <button id="tMerge">Merge boxes</button>
+</div>
+
+<section id="scan">
+  <div class="card">
+    <div class="row">
+      <input id="station" placeholder="Destination, e.g. MWINGI (WAITA) PRISON" autocomplete="off">
+      <input id="box" placeholder="Box number" autocomplete="off">
+    </div>
+  </div>
+  <div class="card">
+    <div class="row">
+      <input id="isbn" inputmode="numeric" enterkeyhint="go" placeholder="Scan or type ISBN" autocomplete="off">
+      <button id="add" class="p">Add</button>
+      <button id="cam">Start camera</button>
+      <button id="manual">Add without ISBN</button>
+    </div>
+    <div id="reader"></div>
+    <p id="msg" role="status"></p>
+  </div>
+  <div class="card">
+    <div class="tw">
+      <table>
+        <thead><tr><th>ISBN</th><th>Title</th><th>Author</th><th>Copies</th><th></th></tr></thead>
+        <tbody id="list"></tbody>
+      </table>
+    </div>
+    <p class="tot" id="tot"></p>
+    <div class="row" style="margin-top:10px">
+      <button id="expw" class="p">Download Word list</button>
+      <button id="exp">Excel (for merging)</button>
+      <button id="clr">Start new box</button>
+    </div>
+  </div>
+</section>
+
+<section id="merge" class="hide">
+  <div class="card">
+    <p>Choose the Excel files (from "Excel (for merging)") for boxes going to the same destination. Copies for the same ISBN are added together and S/NO is renumbered.</p>
+    <input type="file" id="files" accept=".xlsx,.xls" multiple>
+    <div class="row" style="margin-top:10px"><input id="mstation" placeholder="Destination, e.g. MWINGI (WAITA) PRISON"><input id="mname" placeholder="File name (e.g. Mwingi_All)"><button id="mgow" class="p">Merge to Word</button><button id="mgo">Merge to Excel</button></div>
+    <p id="mmsg" role="status"></p>
+  </div>
+</section>
+
+<dialog id="dlg">
+  <form method="dialog" id="mf">
+    <h3 style="margin-top:0">Add book without ISBN</h3>
+    <input id="mt" placeholder="Title" required>
+    <input id="ma" placeholder="Author">
+    <input id="mc" type="number" min="1" value="1" aria-label="Copies">
+    <div class="row"><button value="x" formnovalidate>Cancel</button><button class="p" value="ok">Add</button></div>
+  </form>
+</dialog>
+
+<script>
+const $=id=>document.getElementById(id);
+const KEY='bookbox.v1';
+let S={station:'',box:'',items:[]};
+try{S=Object.assign(S,JSON.parse(localStorage.getItem(KEY)||'{}'))}catch(e){}
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+const say=(t,k)=>{const m=$('msg');m.textContent=t;m.className=k||''};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ISBN helpers: everything is stored as ISBN-13 */
+function toIsbn13(raw){
+  const s=String(raw).toUpperCase().replace(/[^0-9X]/g,'');
+  if(s.length===13&&/^\d+$/.test(s))return s;
+  if(s.length===10&&/^\d{9}[\dX]$/.test(s)){
+    const b='978'+s.slice(0,9);
+    let sum=0;for(let i=0;i<12;i++)sum+=+b[i]*(i%2?3:1);
+    return b+((10-sum%10)%10);
+  }
+  return null;
+}
+
+/* Title lookup: Open Library first, Google Books as fallback */
+async function lookup(isbn){
+  try{
+    const r=await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
+    const d=(await r.json())['ISBN:'+isbn];
+    if(d&&d.title)return{title:d.title+(d.subtitle?': '+d.subtitle:''),author:(d.authors||[]).map(a=>a.name).join(', ')};
+  }catch(e){if(!navigator.onLine)throw e}
+  try{
+    const r=await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
+    const v=((await r.json()).items||[])[0]?.volumeInfo;
+    if(v&&v.title)return{title:v.title+(v.subtitle?': '+v.subtitle:''),author:(v.authors||[]).join(', ')};
+  }catch(e){throw e}
+  return null; // reached the services, book not found
+}
+
+/* Adding books */
+async function addIsbn(raw){
+  const isbn=toIsbn13(raw);
+  if(!isbn){say('Not a valid ISBN: '+raw+'. Check the digits.','bad');return}
+  const ex=S.items.find(i=>i.isbn===isbn);
+  if(ex){ex.copies++;save();render();say(`+1 copy: ${ex.title||isbn} (now ${ex.copies})`,'ok');beep();return}
+  const it={isbn,title:'',author:'',copies:1,state:'pending'};
+  S.items.unshift(it);save();render();beep();say('Looking up '+isbn+'…','wait');
+  await resolve(it);
+}
+async function resolve(it){
+  try{
+    const r=await lookup(it.isbn);
+    if(r){it.title=r.title;it.author=r.author;it.state='ok';say('Added: '+r.title,'ok')}
+    else{it.state='missing';say('Not found online: '+it.isbn+'. Tap the row to type the title.','bad')}
+  }catch(e){it.state='pending';say('Lookup failed (offline or blocked). Book saved, will retry.','wait')}
+  save();render();
+}
+function retryPending(){S.items.filter(i=>i.state==='pending'&&i.isbn).forEach(resolve)}
+addEventListener('online',retryPending);
+
+function beep(){
+  try{navigator.vibrate&&navigator.vibrate(60);
+  const c=new (window.AudioContext||window.webkitAudioContext)(),o=c.createOscillator();
+  o.frequency.value=880;o.connect(c.destination);o.start();setTimeout(()=>{o.stop();c.close()},90)}catch(e){}
+}
+
+/* Rendering */
+function render(){
+  $('list').innerHTML=S.items.map((it,i)=>{
+    const t=it.state==='pending'?'<span class="pend">title pending…</span>':
+      it.state==='missing'?`<span class="pend" data-edit="${i}">not found, tap to enter</span>`:esc(it.title);
+    return `<tr><td>${esc(it.isbn||'—')}</td><td data-edit="${i}">${t}</td><td>${esc(it.author)}</td>
+    <td class="n"><button data-d="${i}" aria-label="Fewer">−</button>
+    <input type="number" min="1" value="${it.copies}" data-c="${i}" aria-label="Copies">
+    <button data-u="${i}" aria-label="More">+</button></td>
+    <td><button data-x="${i}" aria-label="Delete row">✕</button></td></tr>`}).join('');
+  const n=S.items.reduce((a,i)=>a+i.copies,0);
+  $('tot').textContent=`${S.items.length} titles, ${n} books in this box`;
+  $('station').value=S.station;$('box').value=S.box;
+}
+$('list').addEventListener('click',e=>{
+  const t=e.target,g=k=>t.dataset[k];
+  if(g('u')!==undefined)S.items[+g('u')].copies++;
+  else if(g('d')!==undefined){const it=S.items[+g('d')];if(it.copies>1)it.copies--}
+  else if(g('x')!==undefined){if(confirm('Delete this row?'))S.items.splice(+g('x'),1)}
+  else if(t.closest('[data-edit]')&&t.tagName!=='INPUT'){
+    const it=S.items[+t.closest('[data-edit]').dataset.edit];
+    const v=prompt('Title',it.title);if(v===null)return;
+    it.title=v;it.author=prompt('Author',it.author)??it.author;it.state='ok';
+  }else return;
+  save();render();
+});
+$('list').addEventListener('change',e=>{
+  if(e.target.dataset.c!==undefined){S.items[+e.target.dataset.c].copies=Math.max(1,parseInt(e.target.value)||1);save();render()}
+});
+$('station').oninput=e=>{S.station=e.target.value;save()};
+$('box').oninput=e=>{S.box=e.target.value;save()};
+
+/* Hardware scanner / typed input */
+const submitIsbn=()=>{const v=$('isbn').value.trim();$('isbn').value='';if(v)addIsbn(v);$('isbn').focus()};
+$('isbn').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();submitIsbn()}});
+$('isbn').addEventListener('input',e=>{if(e.target.value.replace(/[^0-9X]/gi,'').length===13)submitIsbn()});
+$('add').onclick=submitIsbn;
+
+/* Camera */
+let cam=null,last='',lastT=0;
+$('cam').onclick=async()=>{
+  if(cam){await cam.stop().catch(()=>{});cam=null;$('cam').textContent='Start camera';$('cam').classList.remove('on');return}
+  if(!window.Html5Qrcode){say('Camera library did not load. Check your connection.');return}
+  try{
+    cam=new Html5Qrcode('reader',{formatsToSupport:[Html5QrcodeSupportedFormats.EAN_13],useBarCodeDetectorIfSupported:true});
+    await cam.start({facingMode:'environment'},{fps:10,qrbox:{width:260,height:120}},txt=>{
+      const now=Date.now();
+      if(txt===last&&now-lastT<2500)return; // ignore same code held in view
+      last=txt;lastT=now;addIsbn(txt);
+    });
+    $('cam').textContent='Stop camera';$('cam').classList.add('on');
+  }catch(e){cam=null;say('Camera unavailable. It needs HTTPS and camera permission.')}
+};
+
+/* Manual add */
+$('manual').onclick=()=>{$('mt').value='';$('ma').value='';$('mc').value=1;$('dlg').showModal()};
+$('dlg').addEventListener('close',()=>{
+  if($('dlg').returnValue==='ok'&&$('mt').value.trim()){
+    S.items.unshift({isbn:'',title:$('mt').value.trim(),author:$('ma').value.trim(),copies:Math.max(1,parseInt($('mc').value)||1),state:'ok'});
+    save();render();
+  }
+});
+
+/* Export */
+const clean=s=>(s||'').trim().replace(/[^\w\-]+/g,'_')||'Unnamed';
+$('exp').onclick=()=>{
+  if(!S.items.length){say('Nothing to export yet.');return}
+  const rows=S.items.slice().reverse().map(i=>({ISBN:i.isbn,Title:i.title,Author:i.author,Copies:i.copies}));
+  const ws=XLSX.utils.json_to_sheet(rows,{header:['ISBN','Title','Author','Copies']});
+  ws['!cols']=[{wch:16},{wch:48},{wch:30},{wch:8}];
+  // keep ISBN as text so Excel does not mangle it
+  rows.forEach((r,i)=>{const c=ws['A'+(i+2)];if(c&&r.ISBN){c.t='s';c.v=r.ISBN}});
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Box');
+  XLSX.writeFile(wb,`${clean(S.station)}_Box${clean(S.box)}.xlsx`);
+  say('Exported. Start a new box when you are done.');
+};
+$('clr').onclick=()=>{
+  if(S.items.length&&!confirm('Clear this box and start a new one? Export first if you have not.'))return;
+  S={station:S.station,box:'',items:[]};save();render();$('box').focus();
+};
+
+
+/* Word export, matching the Library Department list format */
+const LOGO="iVBORw0KGgoAAAANSUhEUgAAAFUAAABOCAMAAABmOqowAAADAFBMVEVvKi19Rki1hIzY1tfOxs7t6u3n5efPzc/Ny827ubu3tbfZ2Nu9vcatxsbP2dm+x8ettbWlra20vLze5+fM09Pg4uLGyMjb3NzZ2to5nCEhjAAxlBCUxoQplABPmixymVoYGBB1dWNSUkp/f3uJiYW3t7Lm5uK8vLnq6ufc3NnLy8jGxb1pXCc0LhXOzMRUSiemopN7ZzDt6uLNzMn/tQC9jBaEYxDqryPOnCHTqkichEqfloDf1sDrqRjGlCHirTWlhDlkVTW/q39vZU66rpP/rQD3pQD3rRDWlBCseRHenBh7WhiccyHJlzGMaymUczHPrWewmWrWwZjJwK2/vLbo5+XnnBDOjBC1hCmwjEzmvXXjypzPuZGTi3328ejGjCm9jDmNcEKbhmS+t6y0rqRoRA2veSeWayjVxa2vqJ7Lx8Hh3NV7Xz6GcFbe187Ev7nZ1dC2sq739fPj4d+cm5rc29pCMSFCOTHq5N+cUhjiyriEe3XVzsnr1sr06uS3tbT59/b39fT08vHf3dxSMSHNUh5lTkTo3tq/uri7trRza2j7+Pfy7+7OdV3gp5itJgnRmY3vuK2GGAOtRzaMPi/Ph3vvIQC3GADSJgr3GADpOyWyNieEKR7vWEXrZFPTFATojoeydXBSDQjsKRycIRjMWlLea2Pnc2v3CADnCAAxAAB7CwtSISEQCAieXl4YEBAhGBgpISEyKSk5MTFKQkJaUlJ7c3OblJTv5+erpqaVk5Pb2dnLycm5t7f6+fnx8PDs6+vm5eXh4ODW1dXHxsbEw8PBwMCzsrKysbHAwMD9/f37+/v5+fn39/f19fXz8/Pv7+/s7Ozr6+vo6Ojn5+fl5eXj4+Pf39/c3Nzb29vZ2dnW1tbV1dXT09PS0tLQ0NDPz8/Ozs7Nzc3MzMzLy8vIyMjFxcXCwsK/v7+8vLy7u7u5ubm4uLi3t7e1tbWxsbGvr6+srKyqqqqkpKSMjIyEhIRra2tnZ2djY2NaWlpKSkpERERCQkI5OTkpKSkAAACalz9AAAAAynRSTlP///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////8Az9wt2QAAAAFiS0dE/6UH8sUAAAAMY21QUEpDbXAwNzEyAAAAA0gAc7wAABHySURBVFhHtZl7XFN3lsDtQHcXVndlOzvr1h3FtNvtTKERm0hSeQXMTYhGEOwlqViM2qAWtLaUWCPtri0yYituqRilyija4nbSPEiimyosTIAhEEiAJEgiIoISxYQAySbZJHdOwluZT/vPHkmI8Lvfe+4553ceP5a0/n/IksWgapCfeTO1um2Rtc9S21rVbe3tdT8P+0Fdu6a97Zm1z1LXnVS3d3R2tLf9DG2L/qOjE5b+DOrJM2pNvVbbqflpbd85o9HqdJ0/h9rKPqWp7+ruWmTx09qXr9N2Nyy2cBFvtZV9Ut9t0P809stibUOjoauz7hlbLRYDZ85+0dVobOz+CW2LzhY1GHsNuo5nPbAY9eTZSl3jij7jYlrMqfWJoLi7t++2XvusWVsXjdcvz17U95lNxq5F1JjBqovPHuk1m3u7FzHA4tR3zp491ds/YG7U/eVAuCgQNJoHzMbgkqd3zdO6qtvqYANcLBMcuTM0aDLMezzYRfO20SnB2VPm+4MmfX27Wl3X3r5wKyykqus0wbD+pLis4sCQarCvp3PGFep2zbyAL6ooE3x0f/jebTCSur1Tq6tfsBcWUNuOrdP16CGmNBfKBOfvqFT9xhlljz3f2dXQ0FU/ZZIPzgsEv+9XDfc3ajX7NtR3ByKmXjMXC/Opde9z2HHmfnNvT31RxVcVp26q7vd1TznsGE72G/ANeDyI/c+KsnMH7g0HnuUVStS+EPO9/r75ITaPultWGBWpVDU3DfbpdecFZ4/0z1r2VZkQ86lUTUNg6QD2nTLBxb6BeyaDrjOusLBQsra5efhO41zkzlF3U2K2UHKTkpufjNwMMRz+sizOGNQb9sKrMkwkxmQjjy3DpoC26qLKI5+Z+0Madeti0YToQgprY3hYU/9cyMxSd+dx2LzP4wlEZuYjy7DZoP3iQvJ7pn4z7IW3ZJhYHAnYMOuj4RB9/Sfsyrfgjibjq9lMBkLY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";
+const up=t=>String(t||'').toUpperCase();
+function saveBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
+async function downloadWord(rows,station,fname){
+  const D=docx,F='Tahoma',C=D.AlignmentType.CENTER;
+  const run=(t,b)=>new D.TextRun({text:t,bold:!!b,font:F,size:24});
+  const P=(t,b,al)=>new D.Paragraph({alignment:al,children:[run(t,b)]});
+  const W=[1000,3800,2300,2260];
+  const cell=(t,i,b,al)=>new D.TableCell({width:{size:W[i],type:D.WidthType.DXA},children:[P(t,b,al)]});
+  const head=new D.TableRow({tableHeader:true,children:['S/NO','TITLE','AUTHOR','NO. OF COPIES'].map((t,i)=>cell(t,i,true))});
+  const body=rows.map((r,n)=>new D.TableRow({cantSplit:true,children:[cell(String(n+1),0),cell(up(r.Title),1),cell(up(r.Author),2),cell(String(r.Copies),3)]}));
+  const dots=n=>'.'.repeat(n);
+  const sign=(l,n)=>new D.Paragraph({spacing:{before:240},children:[run(l+' ',true),run(dots(n))]});
+  const logo=Uint8Array.from(atob(LOGO),c=>c.charCodeAt(0));
+  const doc=new D.Document({sections:[{
+    properties:{page:{size:{width:12240,height:15840},margin:{top:964,bottom:964,left:1440,right:1440}}},
+    children:[
+      new D.Paragraph({alignment:C,children:[new D.ImageRun({data:logo,type:'png',transformation:{width:82,height:61}})]}),
+      P('MINISTRY OF INTERIOR AND NATIONAL ADMINISTRATION',true,C),
+      P('STATE DEPARTMENT FOR CORRECTIONAL SERVICES',true,C),
+      P('LIBRARY DEPARTMENT',true,C),
+      new D.Paragraph({children:[]}),
+      P('LIST OF BOOKS TO '+(up(station.trim())||'____________________'),true),
+      new D.Paragraph({children:[]}),
+      new D.Table({layout:D.TableLayoutType.FIXED,width:{size:9360,type:D.WidthType.DXA},columnWidths:W,rows:[head,...body]}),
+      new D.Paragraph({children:[]}),
+      new D.Paragraph({keepNext:true,children:[run('RECEIVED BY',true)]}),
+      sign('NAME:',60),sign('SIGNATURE:',55),sign('DATE:',60)
+    ]}]});
+  saveBlob(await D.Packer.toBlob(doc),fname+'.docx');
+}
+$('expw').onclick=async()=>{
+  if(!S.items.length){say('Nothing to export yet.','bad');return}
+  const rows=S.items.slice().reverse().map(i=>({Title:i.title||(i.isbn?'ISBN '+i.isbn:''),Author:i.author,Copies:i.copies}));
+  const miss=S.items.filter(i=>i.state!=='ok').length;
+  if(miss&&!confirm(miss+' book(s) still have no title. Download anyway?'))return;
+  try{await downloadWord(rows,S.station,clean(S.station)+'_Box'+clean(S.box));say('Word list downloaded.','ok')}
+  catch(e){say('Word export failed: '+e.message+'. Is the docx library loaded?','bad')}
+};
+
+/* Merge */
+async function doMerge(kind){
+  const fs=[...$('files').files];
+  if(fs.length<2){$('mmsg').textContent='Choose at least two files.';return}
+  const map=new Map();
+  for(const f of fs){
+    const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{raw:false});
+    const box=f.name.replace(/\.xlsx?$/i,'');
+    for(const r of rows){
+      const isbn=String(r.ISBN??'').trim(),title=String(r.Title??'').trim(),author=String(r.Author??'').trim();
+      const n=parseInt(r.Copies)||1;
+      const k=isbn||('m:'+title.toLowerCase()+'|'+author.toLowerCase());
+      const e=map.get(k)||{ISBN:isbn,Title:title,Author:author,Copies:0,Boxes:[]};
+      if(!e.Title&&title)e.Title=title;if(!e.Author&&author)e.Author=author;
+      e.Copies+=n;if(!e.Boxes.includes(box))e.Boxes.push(box);
+      map.set(k,e);
+    }
+  }
+  const out=[...map.values()].map(e=>({...e,Boxes:e.Boxes.join(', ')}));
+  const ws=XLSX.utils.json_to_sheet(out,{header:['ISBN','Title','Author','Copies','Boxes']});
+  ws['!cols']=[{wch:16},{wch:48},{wch:30},{wch:8},{wch:30}];
+  out.forEach((r,i)=>{const c=ws['A'+(i+2)];if(c&&r.ISBN){c.t='s';c.v=r.ISBN}});
+  const fn=clean($('mname').value||'Merged');
+  if(kind==='word')await downloadWord(out,$('mstation').value,fn);
+  else{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Merged');XLSX.writeFile(wb,fn+'.xlsx')}
+  $('mmsg').textContent=`Merged ${fs.length} files into ${out.length} titles.`;
+}
+$('mgo').onclick=()=>doMerge('xlsx');$('mgow').onclick=()=>doMerge('word');
+
+/* Tabs */
+function tab(m){
+  $('scan').classList.toggle('hide',m);$('merge').classList.toggle('hide',!m);
+  $('tScan').classList.toggle('on',!m);$('tMerge').classList.toggle('on',m);
+}
+$('tScan').onclick=()=>tab(false);$('tMerge').onclick=()=>tab(true);
+
+render();retryPending();
+</script>
+</body>
+</html>
